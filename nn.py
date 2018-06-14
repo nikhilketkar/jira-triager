@@ -176,7 +176,7 @@ def train_eval(train_examples, test_examples, max_length, s2p, epochs, parameter
         model.cuda()
 
     criterion = torch.nn.CrossEntropyLoss()
-    optimizer = torch.optim.SGD(model.parameters(), lr=parameters["learning_rate"])
+    optimizer = torch.optim.Adam(model.parameters(), lr=parameters["learning_rate"])
 
     train_metric, train_loss = eval(model, train_data_loader, criterion)
     test_metric, test_loss = eval(model, test_data_loader, criterion)
@@ -213,10 +213,10 @@ def main(data_path, split, epochs, grid_points, output_path, cuda=False):
     train_examples, test_examples, max_length, s2p = build_dataset(data_path, split)
     random_grid = RandomGrid()
     random_grid.add_parameter("learning_rate", [1e-2, 1e-3, 1e-4, 1e-5])
-    random_grid.add_parameter("batch_size", [1024])
-    random_grid.add_parameter("embedding_in", [256])
-    random_grid.add_parameter("embedding_out", [32, 64, 128])
-    random_grid.add_parameter("lstm_layers", [1,2,3])
+    random_grid.add_parameter("batch_size", [32, 64, 128, 256, 512, 1024])
+    random_grid.add_parameter("embedding_in", [32, 64, 128, 256])
+    random_grid.add_parameter("embedding_out", [32, 64, 128, 256])
+    random_grid.add_parameter("lstm_layers", [1,2,3,4,5])
 
     with open(output_path, 'w', 0) as output_file:
         for counter, parameters in random_grid.grid():
