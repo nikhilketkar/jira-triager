@@ -209,9 +209,9 @@ class RandomGrid:
                 result[static_key] = static_value
             yield counter, result
 
-def main(payload_path, labels_path, retain, split, epochs, grid_points, output_path, cuda=False):
-    train_examples, test_examples, labels, max_length, train_distribution, test_distribution = build_dataset(payload_path, labels_path, retain, split)
-
+def main(payload_path, data_path, retain, split, epochs, grid_points, output_path, cuda=False):
+    train_examples, test_examples, max_length, s2p = build_dataset(data_path, split)
+train, test, max_length, s2p
     random_grid = RandomGrid()
     random_grid.add_static("train_size", len(train_examples))
     random_grid.add_static("test_size", len(test_examples))
