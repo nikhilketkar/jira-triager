@@ -14,6 +14,7 @@ import ipdb
 
 from sklearn.metrics import roc_auc_score
 from sklearn.metrics import accuracy_score
+from sklearn.metrics import precision_recall_fscore_support
 
 class String2Position:
     def __init__(self):
@@ -66,8 +67,7 @@ class JiraIssues(Dataset):
         actual_values = [ord(i) for i in summary]
         padding_length = self.max_length - actual_length
         i = torch.LongTensor([actual_values + [0] * padding_length])
-        o = torch.zeros(self.s2p.counter)
-        o[self.s2p.get(component)] = 1.0
+        o = self.s2p.get(component)
         return {"component": component,
                 "summary": summary,
                 "input": i,
@@ -78,18 +78,18 @@ def custom_batch(examples):
     examples.sort(key = lambda x: x["actual_length"], reverse = True)
     result = {"input": torch.cat([i["input"] for i in examples]),
               "actual_length": [i["actual_length"] for i in examples],
-              "output": torch.cat([i["output"] for i in examples])}
+              "output": torch.LongTensor([i["output"] for i in examples])}
     return result
 
 def custom_batch_cuda(examples):
     examples.sort(key = lambda x: x["actual_length"], reverse = True)
     result = {"input": torch.cat([i["input"] for i in examples]).cuda(),
               "actual_length": [i["actual_length"] for i in examples],
-              "output": torch.cat([i["output"] for i in examples]).cuda()}
+              "output": torch.LongTensor([i["output"] for i in examples]).cuda()}
     return result
 
 class Model(torch.nn.Module):
-    def __init__(self, vocab_size, embedding_size, lstm_layers):
+    def __init__(self, vocab_size, embedding_size, lstm_layers, classes):
         super(Model, self).__init__()
         self.vocab_size = vocab_size
         self.embedding_size = embedding_size
@@ -97,7 +97,7 @@ class Model(torch.nn.Module):
         self.lstm_layers = lstm_layers
         self.E = torch.nn.Embedding(vocab_size, embedding_size)
         self.LSTM = torch.nn.LSTM(input_size=embedding_size, hidden_size=embedding_size, num_layers=lstm_layers, batch_first=True)
-        self.Linear = torch.nn.Linear(embedding_size, 2)
+        self.Linear = torch.nn.Linear(embedding_size, classes)
         self.Softmax = torch.nn.Softmax(dim=1)
 
     def gen_hidden(self, batch_size):
@@ -125,19 +125,19 @@ class Model(torch.nn.Module):
         softmax_out = self.Softmax(linear_out)
         return softmax_out
 
-
 def eval(model, data, criterion):
-    ipdb.set_trace()
-    metric = []
     loss = []
+    actual = []
+    predicted = []
     for batch in data:
         y_hat = model.forward(batch)
         _, y_hat_index = y_hat.max(1)
-        metric.append(roc_auc_score(y_hat_index.cpu(), batch["output"].cpu()))
+        actual.append(batch["output"].cpu())
+        predicted.append(y_hat_index.cpu())
         loss.append(criterion(y_hat.cpu(), batch["output"].cpu()).data[0])
-
-    return np.mean(metric), np.mean(loss)
-
+    actual = torch.cat(actual)
+    predicted = torch.cat(predicted)
+    return precision_recall_fscore_support(actual, predicted, average = 'weighted'), np.mean(loss)
 
 def train(model, criterion, train_data_loader, optimizer):
     for batch in train_data_loader:
@@ -158,9 +158,9 @@ def write_results(parameters, epoch, train_metric, test_metric, train_loss, test
     output_file.write(json.dumps(result) + "\n")
 
 
-def train_eval(train_examples, test_examples, max_length, epochs, parameters, output_file, cuda):
-    train_dataset = EmailGender(train_examples, max_length)
-    test_dataset = EmailGender(test_examples, max_length)
+def train_eval(train_examples, test_examples, max_length, s2p, epochs, parameters, output_file, cuda):
+    train_dataset = JiraIssues(train_examples, max_length, s2p)
+    test_dataset = JiraIssues(test_examples, max_length, s2p)
 
     if cuda:
         custom_batch_function = custom_batch_cuda
@@ -170,7 +170,7 @@ def train_eval(train_examples, test_examples, max_length, epochs, parameters, ou
     train_data_loader = DataLoader(train_dataset, batch_size=parameters["batch_size"], collate_fn=custom_batch_function)
     test_data_loader = DataLoader(test_dataset, batch_size=parameters["batch_size"], collate_fn=custom_batch_function)
 
-    model = Model(parameters["embedding_in"], parameters["embedding_out"], parameters["lstm_layers"])
+    model = Model(parameters["embedding_in"], parameters["embedding_out"], parameters["lstm_layers"], s2p.counter)
     
     if cuda:
         model.cuda()
@@ -209,16 +209,11 @@ class RandomGrid:
                 result[static_key] = static_value
             yield counter, result
 
-def main(payload_path, data_path, retain, split, epochs, grid_points, output_path, cuda=False):
+def main(data_path, split, epochs, grid_points, output_path, cuda=False):
     train_examples, test_examples, max_length, s2p = build_dataset(data_path, split)
-train, test, max_length, s2p
     random_grid = RandomGrid()
-    random_grid.add_static("train_size", len(train_examples))
-    random_grid.add_static("test_size", len(test_examples))
-    random_grid.add_static("train_distribution", train_distribution)
-    random_grid.add_static("test_distribution", test_distribution)
     random_grid.add_parameter("learning_rate", [1e-2, 1e-3, 1e-4, 1e-5])
-    random_grid.add_parameter("batch_size", [128, 256, 512, 1024])
+    random_grid.add_parameter("batch_size", [1024])
     random_grid.add_parameter("embedding_in", [256])
     random_grid.add_parameter("embedding_out", [32, 64, 128])
     random_grid.add_parameter("lstm_layers", [1,2,3])
@@ -226,7 +221,7 @@ train, test, max_length, s2p
     with open(output_path, 'w', 0) as output_file:
         for counter, parameters in random_grid.grid():
             if counter < grid_points:
-                train_eval(train_examples, test_examples, max_length, epochs, parameters, output_file, cuda)
+                train_eval(train_examples, test_examples, max_length, s2p, epochs, parameters, output_file, cuda)
 
 if __name__ == "__main__":
     payload_path = sys.argv[1]
