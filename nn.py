@@ -19,14 +19,19 @@ from sklearn.metrics import precision_recall_fscore_support
 class String2Position:
     def __init__(self):
         self.mapping = {}
+        self.reverse_mapping = {}
         self.counter = 0
 
     def get(self, given):
         if given not in self.mapping:
             self.mapping[given] = self.counter
+            self.reverse_mapping[self.counter] = given 
             self.counter += 1
         return self.mapping[given]
 
+    def lookup(self, given):
+        return self.reverse_mapping[given]
+    
     def dump(self, path):
         result = {}
         result["mapping"] = self.mapping
@@ -117,6 +122,7 @@ class Model(torch.nn.Module):
         self.lstm_layers = lstm_layers
         self.E = torch.nn.Embedding(vocab_size, embedding_size)
         self.LSTM = torch.nn.LSTM(input_size=embedding_size, hidden_size=embedding_size, num_layers=lstm_layers, batch_first=True)
+        self.LinearBefore = torch.nn.Linear(embedding_size, embedding_size)
         self.Linear = torch.nn.Linear(embedding_size, classes)
         self.Softmax = torch.nn.Softmax(dim=1)
 
@@ -141,10 +147,16 @@ class Model(torch.nn.Module):
         if next(self.parameters()).is_cuda:
             i = i.cuda()
         lstm_out = x.gather(1, i).view(y.shape[0], -1).transpose(0,1)
-        linear_out = self.Linear(lstm_out.transpose(0,1))
+        linear_before = torch.nn.functional.relu(self.LinearBefore(lstm_out.transpose(0,1)))
+        linear_out = self.Linear(linear_before)
         softmax_out = self.Softmax(linear_out)
         return softmax_out
 
+def predict(model, s2p, max_length, given):
+    dataset = JiraIssues([], max_length, s2p)
+    _, index = model.forward(custom_batch_cuda([dataset.generate_example(given, None)])).max(1)
+    return s2p.lookup(int(index))
+    
 def eval(model, data, criterion):
     loss = []
     actual = []
@@ -208,6 +220,8 @@ def train_eval(train_examples, test_examples, max_length, s2p, epochs, parameter
         test_metric, test_loss = eval(model, test_data_loader, criterion)
         write_results(parameters, epoch, train_metric, test_metric, train_loss, test_loss, output_file)
 
+    return model, test_metric
+
 
 class RandomGrid:
     def __init__(self):
@@ -235,14 +249,30 @@ def main(data_path, split, epochs, grid_points, output_path, cuda=False):
     random_grid.add_parameter("learning_rate", [1e-3])
     random_grid.add_parameter("batch_size", [1024])
     random_grid.add_parameter("embedding_in", [256])
-    random_grid.add_parameter("embedding_out", [256])
-    random_grid.add_parameter("lstm_layers", [5])
+    random_grid.add_parameter("embedding_out", [64])
+    random_grid.add_parameter("lstm_layers", [1])
 
     with open(output_path, 'w', 0) as output_file:
         for counter, parameters in random_grid.grid():
             if counter < grid_points:
-                train_eval(train_examples, test_examples, max_length, s2p, epochs, parameters, output_file, cuda)
+                model, test_metric = train_eval(train_examples, test_examples, max_length, s2p, epochs, parameters, output_file, cuda)
+                print test_metric
 
+def end_run(data_path, output_path, cuda=False):
+    parameters = {}
+    parameters["learning_rate"] = 1e-4
+    parameters["batch_size"] = 1024
+    parameters["embedding_in"] = 256
+    parameters["embedding_out"] = 256
+    parameters["lstm_layers"] = 3
+    epochs = 50
+    split = 0.8
+    train_examples, test_examples, max_length, s2p = build_dataset(data_path, split)
+    with open(output_path, 'w', 0) as output_file:
+        model, test_metric = train_eval(train_examples, test_examples, max_length, s2p, epochs, parameters, output_file, cuda)
+
+    return model, test_metric, max_length, s2p
+                
 if __name__ == "__main__":
     payload_path = sys.argv[1]
     labels_path = sys.argv[2]
