@@ -5,6 +5,18 @@ from jira import JIRA
 fields="key,Affected Component,summary"
 max_results=10
 
+old_new = {"Batch Processing":"Batch Processing",
+"Data Quality":"Data Quality",
+"I don't know":"None",
+"Infrastructure":"Infrastructure",
+"Ingestion":"Ingesiton",
+"Krios":"Infrastructure",
+"Machine Learning":"Adhoc Query",
+"Pre Processing":"Batch Processing",
+"Reporting & Dashboards":"Report & Dashboard",
+"Seraph (Self-Serve UI)":"Access",
+"Stream Processing":"Stream processing"}
+
 def get_issues(user, password, jql, fields, max_results):
     options = {'server': 'https://jira.fkinternal.com'}
     jira = JIRA(options = options, basic_auth = (user, password))
@@ -33,6 +45,8 @@ def constructJQL(t):
 def updateJira(id,value,jira):
 	issue = jira.issue(id)
 	issue.update(fields={"customfield_17605":{"value":value}})
+
+
 
 
 startPoller(int(sys.argv[1]),sys.argv[2],sys.argv[3],sys.argv[4])
