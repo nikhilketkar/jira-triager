@@ -27,6 +27,20 @@ class String2Position:
             self.counter += 1
         return self.mapping[given]
 
+    def dump(self, path):
+        result = {}
+        result["mapping"] = self.mapping
+        result["counter"] = self.counter
+        with open(path, 'w') as output_file:
+            output_file.write(json.dumps(result))
+
+    def load(self, path):
+        with open(path) as input_file:
+            data = input_file.read()
+            result = json.loads(data)
+            self.mapping = result["mapping"]
+            self.counter = result["counter"]
+            
 def data_reader(path):
     result = []
     max_length = 0
@@ -58,22 +72,28 @@ class JiraIssues(Dataset):
         self.max_length = max_length
         self.s2p = s2p
 
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, index):
-        component, summary = self.data[index]
+    def generate_example(self, summary, component=None):
         actual_length = len(summary)
         actual_values = [ord(i) for i in summary]
         padding_length = self.max_length - actual_length
         i = torch.LongTensor([actual_values + [0] * padding_length])
-        o = self.s2p.get(component)
+        if not component is None:
+            o = self.s2p.get(component)
+        else:
+            o = 0
         return {"component": component,
                 "summary": summary,
                 "input": i,
                 "actual_length": actual_length,
                 "output": o}
+ 
+    def __len__(self):
+        return len(self.data)
 
+    def __getitem__(self, index):
+        component, summary = self.data[index]
+        return self.generate_example(summary, component)
+ 
 def custom_batch(examples):
     examples.sort(key = lambda x: x["actual_length"], reverse = True)
     result = {"input": torch.cat([i["input"] for i in examples]),
@@ -212,11 +232,11 @@ class RandomGrid:
 def main(data_path, split, epochs, grid_points, output_path, cuda=False):
     train_examples, test_examples, max_length, s2p = build_dataset(data_path, split)
     random_grid = RandomGrid()
-    random_grid.add_parameter("learning_rate", [1e-2, 1e-3, 1e-4, 1e-5])
-    random_grid.add_parameter("batch_size", [32, 64, 128, 256, 512, 1024])
-    random_grid.add_parameter("embedding_in", [32, 64, 128, 256])
-    random_grid.add_parameter("embedding_out", [32, 64, 128, 256])
-    random_grid.add_parameter("lstm_layers", [1,2,3,4,5])
+    random_grid.add_parameter("learning_rate", [1e-3])
+    random_grid.add_parameter("batch_size", [1024])
+    random_grid.add_parameter("embedding_in", [256])
+    random_grid.add_parameter("embedding_out", [256])
+    random_grid.add_parameter("lstm_layers", [5])
 
     with open(output_path, 'w', 0) as output_file:
         for counter, parameters in random_grid.grid():
